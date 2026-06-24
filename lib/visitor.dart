@@ -37,7 +37,7 @@ class Visitor extends SimpleAstVisitor<void> {
     registry.addIfElement(rule, this);
     registry.addForElement(rule, this);
     registry.addMapLiteralEntry(rule, this);
-    registry.addDefaultFormalParameter(rule, this);
+    registry.addFormalParameterDefaultClause(rule, this);
     registry.addReturnStatement(rule, this);
     registry.addExpressionFunctionBody(rule, this);
     registry.addSwitchExpressionCase(rule, this);
@@ -76,6 +76,15 @@ class Visitor extends SimpleAstVisitor<void> {
           if (!canModifyDeclaredType) return;
         }
       }
+    }
+
+    final filePath = context.currentUnit?.file.path;
+    if (filePath != null &&
+        plugin.settings.isExcluded(
+          filePath,
+          context.package?.root.path ?? '',
+        )) {
+      return;
     }
 
     rule.reportAtNode(expression);
@@ -126,17 +135,14 @@ class Visitor extends SimpleAstVisitor<void> {
       if (declaredType == null) continue;
 
       while (literalIndex < literal.fields.length &&
-          literal.fields[literalIndex] is NamedExpression) {
+          literal.fields[literalIndex].isNamedRecordField) {
         literalIndex++;
       }
 
       if (literalIndex >= literal.fields.length) break;
 
       final literalField = literal.fields[literalIndex];
-      final expression = switch (literalField) {
-        NamedExpression(:final expression) => expression,
-        _ => literalField,
-      };
+      final expression = literalField.expressionValue;
 
       if (!expression.isDotShorthand) {
         _checkAndReport(expression: expression, declaredType: declaredType);
@@ -152,9 +158,8 @@ class Visitor extends SimpleAstVisitor<void> {
         if (declaredType == null) continue;
 
         for (final literalField in literal.fields) {
-          if (literalField is NamedExpression &&
-              literalField.name.label.name == fieldName) {
-            final expression = literalField.expression;
+          if (literalField.namedRecordFieldName == fieldName) {
+            final expression = literalField.expressionValue;
             if (!expression.isDotShorthand) {
               _checkAndReport(
                 expression: expression,
@@ -194,10 +199,7 @@ class Visitor extends SimpleAstVisitor<void> {
       };
       if (declaredType == null) continue;
 
-      final expression = switch (literalField) {
-        NamedExpression(:final expression) => expression,
-        _ => literalField,
-      };
+      final expression = literalField.expressionValue;
 
       if (!expression.isDotShorthand) {
         _checkAndReport(expression: expression, declaredType: declaredType);
@@ -277,10 +279,7 @@ class Visitor extends SimpleAstVisitor<void> {
   @override
   void visitArgumentList(ArgumentList node) {
     for (final argument in node.arguments) {
-      final expression = switch (argument) {
-        NamedExpression(:final expression) => expression,
-        _ => argument,
-      };
+      final expression = argument.argumentExpression;
 
       if (expression.isDotShorthand) continue;
 
@@ -288,8 +287,7 @@ class Visitor extends SimpleAstVisitor<void> {
       final baseType = parameter?.baseElement.type;
 
       if (baseType is TypeParameterType) {
-        final hasExplicitContext = argument.hasExplicitTypeContext;
-        if (!hasExplicitContext) continue;
+        if (!expression.hasExplicitTypeContext) continue;
       }
 
       _checkAndReport(expression: expression, declaredType: parameter?.type);
@@ -341,18 +339,14 @@ class Visitor extends SimpleAstVisitor<void> {
 
     var positionalIndex = 0;
     for (final field in node.fields) {
-      final expression = switch (field) {
-        NamedExpression(:final expression) => expression,
-        _ => field,
-      };
+      final expression = field.expressionValue;
 
       if (expression.isDotShorthand) {
-        if (field is! NamedExpression) positionalIndex++;
+        if (!field.isNamedRecordField) positionalIndex++;
         continue;
       }
 
-      // Get the expected type for this field
-      final fieldName = field is NamedExpression ? field.name.label.name : null;
+      final fieldName = field.namedRecordFieldName;
       final fieldType = recordType.getFieldTypeByNameOrIndex(
         positionalIndex,
         fieldName,
@@ -362,18 +356,17 @@ class Visitor extends SimpleAstVisitor<void> {
         _checkAndReport(expression: expression, declaredType: fieldType);
       }
 
-      if (field is! NamedExpression) positionalIndex++;
+      if (!field.isNamedRecordField) positionalIndex++;
     }
   }
 
   @override
-  void visitDefaultFormalParameter(DefaultFormalParameter node) {
-    final expression = node.defaultValue;
-    if (expression == null) return;
+  void visitFormalParameterDefaultClause(FormalParameterDefaultClause node) {
+    final expression = node.value;
     if (expression.isDotShorthand) return;
 
-    final declaredType = switch (node.parameter) {
-      SimpleFormalParameter(type: NamedType(type: final type)) => type,
+    final declaredType = switch (node.parent) {
+      FormalParameter(type: NamedType(type: final type)) => type,
       _ => null,
     };
 

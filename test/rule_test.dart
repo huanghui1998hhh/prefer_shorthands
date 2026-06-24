@@ -520,6 +520,33 @@ enum Direction { left, right, up, down }
     );
   }
 
+  void test_exclusion_g_dart_file_is_skipped() async {
+    plugin.settings = Settings(
+      convertImplicitDeclaration: false,
+      excludePatterns: ['**/*.g.dart'],
+    );
+    const code = '''
+enum Direction { left, right }
+Direction dir = Direction.left;
+''';
+    final file = newFile('$testPackageLibPath/model.g.dart', code);
+    await assertDiagnosticsInFile(file.path, []);
+  }
+
+  void test_exclusion_regular_file_is_linted() async {
+    plugin.settings = Settings(
+      convertImplicitDeclaration: false,
+      excludePatterns: ['**/*.g.dart'],
+    );
+    await assertDiagnostics(
+      '''
+enum Direction { left, right }
+Direction dir = Direction.left;
+''',
+      [lint(47, 14)],
+    );
+  }
+
   /// https://github.com/huanghui1998hhh/prefer_shorthands/issues/21
   /// Factory constructors with body should NOT trigger warning
   /// Redirecting factory constructors SHOULD trigger warning
